@@ -1,0 +1,11 @@
+{
+  "name": "runreader-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  // CIMD clients: the OAuth library fetches their metadata document, public hosts only
+  "compatibility_flags": ["global_fetch_strictly_public"],
+  // No IDs: "Deploy to Cloudflare" creates the database and the namespace in your account
+  "d1_databases": [{ "binding": "DB", "database_name": "runreader-mcp" }],
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }]
+  // Secrets (asked by the deploy form, see .dev.vars.example): APP_TOKEN for RunReader, ACCESS_CODE for the connector login
+}
