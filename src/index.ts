@@ -206,7 +206,7 @@ const TOOLS = [
   {
     name: 'aerobic_trend',
     description:
-      "Efficienza aerobica settimana per settimana (solo corse con battiti): metri percorsi per battito cardiaco, passo medio e FC media. Se i metri per battito salgono, l'atleta corre di più con lo stesso sforzo.",
+      "Efficienza aerobica settimana per settimana sulle corse lente: metri percorsi per battito cardiaco, passo medio e FC media. Se i metri per battito salgono, l'atleta corre di più con lo stesso sforzo. Le corse con oltre il 15% del tempo sopra la soglia Z4 (calcolata dal profilo nell'app) sono escluse e contate in hardRunsExcluded: ripetute e corse forti abbassano il valore senza dire nulla sul fondo. Se quasi tutte le corse sono escluse, dillo invece di leggere un trend.",
     inputSchema: { type: 'object', properties: { weeks: { type: 'number', description: 'Default 12, max 52' } } },
   },
   {
@@ -364,6 +364,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       const out = Array.from({ length: weeks }, (_, i) => ({
         weekStart: new Date(start + i * WEEK).toISOString().slice(0, 10),
         runs: 0,
+        hardRunsExcluded: 0,
         meters: 0,
         seconds: 0,
         beats: 0,
@@ -371,6 +372,11 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       for (const r of runs) {
         const w = out[Math.floor((mondayUtc(new Date(r.startTime)) - start) / WEEK)];
         if (!w) continue;
+        // Same rule as the app's Coach card; summaries sent before the field existed count as easy
+        if (typeof r.hardTimePercent === 'number' && r.hardTimePercent > 15) {
+          w.hardRunsExcluded += 1;
+          continue;
+        }
         w.runs += 1;
         w.meters += r.distanceMeters;
         w.seconds += r.movingSeconds;
@@ -378,10 +384,11 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       }
       return out.map((w) =>
         w.runs === 0
-          ? { weekStart: w.weekStart, runs: 0 }
+          ? { weekStart: w.weekStart, runs: 0, hardRunsExcluded: w.hardRunsExcluded }
           : {
               weekStart: w.weekStart,
               runs: w.runs,
+              hardRunsExcluded: w.hardRunsExcluded,
               metersPerBeat: round(w.meters / w.beats),
               avgPace: paceText(w.seconds / (w.meters / 1000)),
               avgHeartRate: Math.round(w.beats / (w.seconds / 60)),
