@@ -27,6 +27,17 @@ Solo riepiloghi: data, tipo, km, tempi, passo, FC media e massima, frazioni al
 km, tratti migliori. **Mai** la traccia GPS né i battiti secondo per secondo.
 Puoi cancellare tutto dall'app (**Cancella dal server**).
 
+## Cambiare i codici
+
+Dal browser del telefono: [dash.cloudflare.com](https://dash.cloudflare.com) ›
+Workers & Pages › runreader-mcp › Settings › Variables and Secrets.
+- Nuovo `APP_TOKEN`: incollalo anche in RunReader e tocca **Salva e verifica**.
+- Nuovo `ACCESS_CODE`: ogni Claude collegato con il codice vecchio viene
+  scollegato e, al prossimo uso, ti chiede quello nuovo.
+
+La pagina di accesso mostra a chi stai dando l'accesso: se l'indirizzo non è di
+Claude compare un avviso, e il codice non va inserito.
+
 ---
 
 # RunReader MCP (English)
@@ -42,6 +53,12 @@ back into the app, then add a custom connector on claude.ai (in the browser)
 with the address ending in `/mcp` and the access code.
 
 Only summaries are stored: never GPS tracks or per-second heart rate.
+
+To change the codes, edit the secrets in the Cloudflare dashboard (Workers &
+Pages › runreader-mcp › Settings › Variables and Secrets). A new `APP_TOKEN`
+must also be pasted into RunReader; a new `ACCESS_CODE` logs out every Claude
+connected with the old one. The login page shows who is asking for access and
+warns when the address is not Claude's.
 
 ## From a computer
 

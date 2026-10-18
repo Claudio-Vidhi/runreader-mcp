@@ -33,12 +33,24 @@ interface Summary {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+/**
+ * Fingerprint of the current ACCESS_CODE, stored in each Claude login: when the
+ * code changes, every connector logged in with the old one is cut off.
+ */
+async function codeId(env: Env): Promise<string> {
+  const code = (env.ACCESS_CODE ?? '').normalize('NFC').trim();
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`runreader-login:${code}`));
+  return btoa(String.fromCharCode(...new Uint8Array(hash)));
+}
+
 /** Constant-time comparison, so a wrong token or code leaks nothing through timing */
 async function sameSecret(given: string, expected: string): Promise<boolean> {
+  // A secret pasted into `wrangler secret put` or a phone field easily carries a trailing newline
+  expected = expected.trim();
   if (!expected) return false;
   const enc = new TextEncoder();
   const [a, b] = await Promise.all(
-    [given, expected].map((s) => crypto.subtle.digest('SHA-256', enc.encode(s)))
+    [given.trim(), expected].map((s) => crypto.subtle.digest('SHA-256', enc.encode(s)))
   );
   return crypto.subtle.timingSafeEqual(a, b);
 }
@@ -47,7 +59,7 @@ async function sameSecret(given: string, expected: string): Promise<boolean> {
 
 async function handleSync(request: Request, env: Env, path: string): Promise<Response> {
   const auth = request.headers.get('authorization') ?? '';
-  if (!(await sameSecret(auth.replace(/^Bearer /, ''), env.APP_TOKEN))) return json({ error: 'unauthorized' }, 401);
+  if (!(await sameSecret(auth.replace(/^Bearer /, ''), env.APP_TOKEN ?? ''))) return json({ error: 'unauthorized' }, 401);
 
   if (request.method === 'PUT' && path === '/sync') {
     const text = await request.text();
@@ -132,9 +144,15 @@ async function handleAuthorize(request: Request, env: Env): Promise<Response> {
     return Response.redirect(redirect.href, 302);
   }
 
+  // Anyone can register a client: show where the access goes, so a phishing link stands out
+  const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
+  const host = new URL(oauthRequest.redirectUri).host;
+  const isClaude = /(^|\.)claude\.(ai|com)$/.test(host);
   const form = (message = '') =>
     page(`<h2>Collega RunReader a Claude</h2>
 <p>Claude potrà leggere i riepiloghi delle tue attività (niente GPS).</p>
+<p>Richiesta da <b>${escapeHtml(client?.clientName ?? oauthRequest.clientId)}</b>, l'accesso va a <b>${escapeHtml(host)}</b>.</p>
+${isClaude ? '' : '<p style="color:#c00"><b>Attenzione: questo non è un indirizzo di Claude.</b> Se non hai avviato tu il collegamento, chiudi la pagina.</p>'}
 ${message ? `<p style="color:#c00">${message}</p>` : ''}
 <form method="post"><input name="code" type="password" autocomplete="current-password" placeholder="Codice di accesso"
  style="width:100%;padding:10px;font-size:16px" autofocus><button style="margin-top:12px;padding:10px 16px;font-size:16px">Autorizza</button></form>`);
@@ -154,7 +172,7 @@ ${message ? `<p style="color:#c00">${message}</p>` : ''}
     userId: 'owner',
     metadata: {},
     scope: oauthRequest.scope.filter((s) => s === 'mcp:read'),
-    props: {},
+    props: { code: await codeId(env) },
   });
   return Response.redirect(redirectTo, 302);
 }
@@ -537,7 +555,15 @@ async function rpc(env: Env, msg: RpcMessage): Promise<object | null> {
 }
 
 const mcpHandler = {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Logged in with an older ACCESS_CODE: revoke the whole login, so the refresh
+    // token dies too and Claude has to ask for the current code
+    const { props, auth } = ctx as ExecutionContext<{ code?: string }> & { auth: { token: string } };
+    if (props?.code !== (await codeId(env))) {
+      const [userId, grantId] = auth.token.split(':'); // token format: {userId}:{grantId}:{secret}
+      await env.OAUTH_PROVIDER.revokeGrant(grantId, userId);
+      return new Response(null, { status: 401, headers: { 'www-authenticate': 'Bearer error="invalid_token"' } });
+    }
     // Stateless server: no SSE stream to open, no session to close
     if (request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
     let body: RpcMessage | RpcMessage[];
